@@ -1,0 +1,108 @@
+name: 'Setup Claude Code'
+description: 'Install and configure Claude Code CLI with custom LLM endpoint'
+
+inputs:
+  llm_api_key:
+    description: 'LLM API key'
+    required: true
+  llm_base_url:
+    description: 'LLM API base URL'
+    required: true
+  fast_model:
+    description: 'Fast model name'
+    required: false
+    default: 'claude-haiku'
+  default_model:
+    description: 'Default model name'
+    required: false
+    default: 'claude-sonnet'
+  smart_model:
+    description: 'Smart model name'
+    required: false
+    default: 'claude-opus'
+  node_version:
+    description: 'Node.js version'
+    required: false
+    default: '20'
+  claude_code_version:
+    description: 'Claude Code package version (empty for latest)'
+    required: false
+    default: ''
+  permission_mode:
+    description: 'Permission mode: default, acceptEdits, plan, auto, bypassPermissions'
+    required: false
+    default: 'auto'
+  tavily_api_key:
+    description: 'Tavily API key for web search MCP (optional)'
+    required: false
+    default: ''
+
+outputs:
+  claude_code_version:
+    description: 'Installed Claude Code version'
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    - id: install
+      shell: bash
+      run: |
+        PKG="@anthropic-ai/claude-code"
+        if [ -n "${{ inputs.claude_code_version }}" ]; then
+          PKG="${PKG}@${{ inputs.claude_code_version }}"
+        fi
+        npm install -g "$PKG"
+        VERSION=$(claude --version 2>/dev/null || echo "unknown")
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "Claude Code $VERSION installed"
+
+    - shell: bash
+      run: |
+        cat >> "$GITHUB_ENV" << EOF
+        ANTHROPIC_API_KEY=${{ inputs.llm_api_key }}
+        ANTHROPIC_BASE_URL=${{ inputs.llm_base_url }}
+        ANTHROPIC_SMALL_FAST_MODEL=${{ inputs.fast_model }}
+        ANTHROPIC_DEFAULT_SONNET_MODEL=${{ inputs.default_model }}
+        ANTHROPIC_DEFAULT_OPUS_MODEL=${{ inputs.smart_model }}
+        ANTHROPIC_DEFAULT_HAIKU_MODEL=${{ inputs.fast_model }}
+        API_TIMEOUT_MS=3000000
+        ENABLE_TOOL_SEARCH=0
+        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+        CI=true
+        CLAUDE_PERMISSION_MODE=${{ inputs.permission_mode }}
+        EOF
+
+    - shell: bash
+      run: |
+        if [ ! -f .claude.json ]; then
+          echo '{"hasCompletedProjectOnboarding":true}' > .claude.json
+        fi
+
+    - shell: bash
+      run: |
+        cat > /usr/local/bin/agent-do << 'WRAPPER'
+        #!/bin/bash
+        exec claude -p --permission-mode "${CLAUDE_PERMISSION_MODE:-auto}" --output-format text "$@"
+        WRAPPER
+        chmod +x /usr/local/bin/agent-do
+
+    - shell: bash
+      run: |
+        git config --global user.name "claude-bot"
+        git config --global user.email "claude-bot@noreply"
+
+    - shell: bash
+      run: |
+        if [ -n "${{ inputs.tavily_api_key }}" ]; then
+          claude mcp add tavily-mcp -s user --transport http "https://mcp.tavily.com/mcp/?tavilyApiKey=${{ inputs.tavily_api_key }}"
+        fi
+
+    - shell: bash
+      run: claude --version

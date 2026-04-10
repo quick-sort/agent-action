@@ -1,0 +1,45 @@
+name: Test Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        with:
+          llm_api_key: ${{ secrets.LLM_API_KEY }}
+          llm_base_url: ${{ secrets.LLM_BASE_URL }}
+
+      - name: Verify claude is installed
+        run: claude --version
+
+      - name: Verify agent-do is available
+        run: which agent-do
+
+      - name: Verify environment variables
+        run: |
+          test -n "$ANTHROPIC_API_KEY" || (echo "ANTHROPIC_API_KEY not set" && exit 1)
+          test -n "$ANTHROPIC_BASE_URL" || (echo "ANTHROPIC_BASE_URL not set" && exit 1)
+          echo "All environment variables set"
+
+      - name: Verify .claude.json
+        run: |
+          test -f .claude.json || (echo ".claude.json not found" && exit 1)
+          grep -q "hasCompletedProjectOnboarding" .claude.json
+          echo ".claude.json OK"
+
+      - name: Verify git config
+        run: |
+          test "$(git config --global user.name)" = "claude-bot"
+          echo "Git config OK"
+
+      - name: Test agent-do
+        run: agent-do "Say hello in one word"
